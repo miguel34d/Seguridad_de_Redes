@@ -1,0 +1,230 @@
+========================================================================
+TOPOLOGÍA: IPSec IKEv1 - Site to Site basado en políticas con VLANs
+DIRECCIONAMIENTO: Privado 10.13.67.x | Público 200.13.67.x
+========================================================================
+
+------------------------------------------------------------------------
+1. CONFIGURACIÓN DEL ROUTER: ISP
+------------------------------------------------------------------------
+enable
+configure terminal
+hostname ISP
+
+interface e0/0
+ description Enlace hacia PEAR-A
+ ip address 200.13.67.1 255.255.255.252
+ no shutdown
+exit
+
+interface e0/1
+ description Enlace hacia PEAR-B
+ ip address 200.13.67.5 255.255.255.252
+ no shutdown
+exit
+end
+
+------------------------------------------------------------------------
+2. CONFIGURACIÓN DEL ROUTER: PEAR-A (Sitio Izquierdo - VLAN 10)
+------------------------------------------------------------------------
+enable
+configure terminal
+hostname PEAR-A
+
+interface e0/0
+ description WAN hacia ISP
+ ip address 200.13.67.2 255.255.255.252
+ no shutdown
+exit
+
+interface e0/1
+ description Interfaz Fisica LAN (Conectada a Switch1 e0/0)
+ no shutdown
+exit
+
+interface e0/1.10
+ description Gateway VLAN 10
+ encapsulation dot1Q 10
+ ip address 10.13.67.1 255.255.255.128
+exit
+
+ip route 0.0.0.0 0.0.0.0 200.13.67.1
+
+! FASE 1 ISAKMP (Políticas y Claves)
+crypto isakmp policy 10
+ encr aes
+ hash sha
+ authentication pre-share
+ group 2
+ lifetime 86400
+exit
+crypto isakmp key cisco123 address 200.13.67.6
+
+! FASE 2 IPSEC (Transform Set)
+crypto ipsec transform-set TSET esp-aes esp-sha-hmac 
+ mode tunnel
+exit
+
+! ACL DEL TRÁFICO INTERESANTE (VLAN 10 -> VLAN 20)
+! Origen: 10.13.67.0/25 -> Destino: 10.13.67.128/25
+access-list 100 permit ip 10.13.67.0 0.0.0.127 10.13.67.128 0.0.0.127
+
+! CRYPTO MAP
+crypto map MAPA_VPN 10 ipsec-isakmp 
+ set peer 200.13.67.6
+ set transform-set TSET 
+ match address 100
+exit
+
+! APLICAR CRYPTO MAP A LA INTERFAZ WAN
+interface e0/0
+ crypto map MAPA_VPN
+exit
+conf t
+no access-list 100
+
+! Línea 10: Tráfico de VLAN 10 hacia VLAN 20
+access-list 100 permit ip 10.13.67.0 0.0.0.127 10.13.67.128 0.0.0.127
+
+! Línea 20: Tráfico de VLAN 30 hacia VLAN 40
+access-list 100 permit ip 10.13.68.0 0.0.0.255 10.13.69.0 0.0.0.255
+end
+write
+
+exit
+end
+
+------------------------------------------------------------------------
+3. CONFIGURACIÓN DEL SWITCH: Switch1 (VLAN 10)
+------------------------------------------------------------------------
+enable
+configure terminal
+hostname Switch1
+
+vlan 10
+ name LAN_VLAN10
+exit
+
+interface e0/0
+ description Troncal hacia PEAR-A
+ switchport trunk encapsulation dot1q
+ switchport mode trunk
+ no shutdown
+exit
+
+interface e0/1
+ description Acceso hacia PC1
+ switchport mode access
+ switchport access vlan 10
+ spanning-tree portfast
+ no shutdown
+exit
+end
+
+------------------------------------------------------------------------
+4. CONFIGURACIÓN DE LA PC: PC1 (VPCS)
+------------------------------------------------------------------------
+ip 10.13.67.10/25 10.13.67.1
+save
+
+------------------------------------------------------------------------
+5. CONFIGURACIÓN DEL ROUTER: PEAR-B (Sitio Derecho - VLAN 20)
+------------------------------------------------------------------------
+enable
+configure terminal
+hostname PEAR-B
+
+interface e0/0
+ description WAN hacia ISP
+ ip address 200.13.67.6 255.255.255.252
+ no shutdown
+exit
+
+interface e0/1
+ description Interfaz Fisica LAN (Conectada a Switch2 e0/0)
+ no shutdown
+exit
+
+interface e0/1.20
+ description Gateway VLAN 20
+ encapsulation dot1Q 20
+ ip address 10.13.67.129 255.255.255.128
+exit
+
+ip route 0.0.0.0 0.0.0.0 200.13.67.5
+
+! FASE 1 ISAKMP (Políticas y Claves)
+crypto isakmp policy 10
+ encr aes
+ hash sha
+ authentication pre-share
+ group 2
+ lifetime 86400
+exit
+crypto isakmp key cisco123 address 200.13.67.2
+
+! FASE 2 IPSEC (Transform Set)
+crypto ipsec transform-set TSET esp-aes esp-sha-hmac 
+ mode tunnel
+exit
+
+! ACL DEL TRÁFICO INTERESANTE (VLAN 20 -> VLAN 10)
+! Origen: 10.13.67.128/25 -> Destino: 10.13.67.0/25
+access-list 100 permit ip 10.13.67.128 0.0.0.127 10.13.67.0 0.0.0.127
+
+! CRYPTO MAP
+crypto map MAPA_VPN 10 ipsec-isakmp 
+ set peer 200.13.67.2
+ set transform-set TSET 
+ match address 100
+exit
+
+! APLICAR CRYPTO MAP A LA INTERFAZ WAN
+interface e0/0
+ crypto map MAPA_VPN
+configure terminal
+! Borrar la versión anterior de la ACL si existía
+no access-list 100
+
+! Línea 10: Tráfico de VLAN 20 hacia VLAN 10
+access-list 100 permit ip 10.13.67.128 0.0.0.127 10.13.67.0 0.0.0.127
+
+! Línea 20: Tráfico de VLAN 40 hacia VLAN 30
+access-list 100 permit ip 10.13.69.0 0.0.0.255 10.13.68.0 0.0.0.255
+end
+write
+exit
+end
+
+------------------------------------------------------------------------
+6. CONFIGURACIÓN DEL SWITCH: Switch2 (VLAN 20)
+------------------------------------------------------------------------
+enable
+configure terminal
+hostname Switch2
+
+vlan 20
+ name LAN_VLAN20
+exit
+
+interface e0/0
+ description Troncal hacia PEAR-B
+ switchport trunk encapsulation dot1q
+ switchport mode trunk
+ no shutdown
+exit
+
+interface e0/1
+ description Acceso hacia PC2
+ switchport mode access
+ switchport access vlan 20
+ spanning-tree portfast
+ no shutdown
+exit
+end
+
+------------------------------------------------------------------------
+7. CONFIGURACIÓN DE LA PC: PC2 (VPCS)
+------------------------------------------------------------------------
+ip 10.13.67.140/25 10.13.67.129
+save
+
