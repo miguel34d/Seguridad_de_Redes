@@ -1,0 +1,222 @@
+========================================================================
+CONFIGURACIÓN COMPLETA DE TODOS LOS DISPOSITIVOS (IPSec IKEv2)
+========================================================================
+Topología: PC1 -> Switch1 -> PEAR-A <---> ISP <---> PEAR-B <- Switch2 <- PC2
+IPs Privadas: 10.13.67.x
+IPs Públicas: 200.13.67.x
+========================================================================
+
+------------------------------------------------------------------------
+1. CONFIGURACIÓN DEL ROUTER: ISP (Centro)
+------------------------------------------------------------------------
+configure terminal
+hostname ISP
+
+! Interfaces Públicas
+interface Ethernet0/0
+ description ENLACE_A_PEAR-A
+ ip address 200.13.67.1 255.255.255.252
+ no shutdown
+
+interface Ethernet0/1
+ description ENLACE_A_PEAR-B
+ ip address 200.13.67.5 255.255.255.252
+ no shutdown
+
+end
+write
+
+
+------------------------------------------------------------------------
+2. CONFIGURACIÓN DEL ROUTER: PEAR-A (Sitio Izquierdo - VLAN 10)
+------------------------------------------------------------------------
+configure terminal
+hostname PEAR-A
+
+! Interfaces
+interface Ethernet0/0
+ description WAN_HACIA_ISP
+ ip address 200.13.67.2 255.255.255.252
+ no shutdown
+
+interface Ethernet0/1
+ description LAN_VLAN10
+ ip address 10.13.67.1 255.255.255.128
+ no shutdown
+
+! Enrutamiento hacia Internet
+ip route 0.0.0.0 0.0.0.0 200.13.67.1
+
+! Política de Tráfico Interesante (VLAN 10 a VLAN 20)
+access-list 102 permit ip 10.13.67.0 0.0.0.127 10.13.67.128 0.0.0.127
+
+! Fase 1: Propuesta y Política IKEv2
+crypto ikev2 proposal PROP_IKEv2_TOP
+ encryption aes-cbc-256
+ integrity sha256
+ group 14
+
+crypto ikev2 policy POL_IKEv2_TOP
+ proposal PROP_IKEv2_TOP
+
+! Fase 1: Autenticación y Llavero
+crypto ikev2 keyring KEYRING_PEAR
+ peer PEAR-B
+  address 200.13.67.6
+  pre-shared-key local cisco123
+  pre-shared-key remote cisco123
+
+crypto ikev2 profile PERFIL_IKEv2_PEAR
+ match identity remote address 200.13.67.6 255.255.255.255
+ identity local address 200.13.67.2
+ authentication remote pre-share
+ authentication local pre-share
+ keyring local KEYRING_PEAR
+
+! Fase 2: Transform-Set IPsec
+crypto ipsec transform-set TSET_IKEv2 esp-aes 256 esp-sha256-hmac
+ mode tunnel
+
+! Vinculación en Crypto Map
+crypto map MAPA_IKEv2_POL 10 ipsec-isakmp
+ set peer 200.13.67.6
+ set transform-set TSET_IKEv2
+ set ikev2-profile PERFIL_IKEv2_PEAR
+ match address 102
+
+! Aplicar Crypto Map en Interfaz WAN
+interface Ethernet0/0
+ crypto map MAPA_IKEv2_POL
+
+end
+write
+
+
+------------------------------------------------------------------------
+3. CONFIGURACIÓN DEL ROUTER: PEAR-B (Sitio Derecho - VLAN 20)
+------------------------------------------------------------------------
+configure terminal
+hostname PEAR-B
+
+! Interfaces
+interface Ethernet0/0
+ description WAN_HACIA_ISP
+ ip address 200.13.67.6 255.255.255.252
+ no shutdown
+
+interface Ethernet0/1
+ description LAN_VLAN20
+ ip address 10.13.67.129 255.255.255.128
+ no shutdown
+
+! Enrutamiento hacia Internet
+ip route 0.0.0.0 0.0.0.0 200.13.67.5
+
+! Política de Tráfico Interesante en Espejo (VLAN 20 a VLAN 10)
+access-list 102 permit ip 10.13.67.128 0.0.0.127 10.13.67.0 0.0.0.127
+
+! Fase 1: Propuesta y Política IKEv2
+crypto ikev2 proposal PROP_IKEv2_TOP
+ encryption aes-cbc-256
+ integrity sha256
+ group 14
+
+crypto ikev2 policy POL_IKEv2_TOP
+ proposal PROP_IKEv2_TOP
+
+! Fase 1: Autenticación y Llavero
+crypto ikev2 keyring KEYRING_PEAR
+ peer PEAR-A
+  address 200.13.67.2
+  pre-shared-key local cisco123
+  pre-shared-key remote cisco123
+
+crypto ikev2 profile PERFIL_IKEv2_PEAR
+ match identity remote address 200.13.67.2 255.255.255.255
+ identity local address 200.13.67.6
+ authentication remote pre-share
+ authentication local pre-share
+ keyring local KEYRING_PEAR
+
+! Fase 2: Transform-Set IPsec
+crypto ipsec transform-set TSET_IKEv2 esp-aes 256 esp-sha256-hmac
+ mode tunnel
+
+! Vinculación en Crypto Map
+crypto map MAPA_IKEv2_POL 10 ipsec-isakmp
+ set peer 200.13.67.2
+ set transform-set TSET_IKEv2
+ set ikev2-profile PERFIL_IKEv2_PEAR
+ match address 102
+
+! Aplicar Crypto Map en Interfaz WAN
+interface Ethernet0/0
+ crypto map MAPA_IKEv2_POL
+
+end
+write
+
+
+------------------------------------------------------------------------
+4. CONFIGURACIÓN DEL SWITCH 1 (Lado Izquierdo)
+------------------------------------------------------------------------
+configure terminal
+hostname Switch1
+
+vlan 10
+ name LAN_PEAR_A
+exit
+
+! Puerto conectado al router PEAR-A
+interface Ethernet0/0
+ switchport mode access
+ switchport access vlan 10
+ spanning-tree portfast
+
+! Puerto conectado a PC1
+interface Ethernet0/1
+ switchport mode access
+ switchport access vlan 10
+ spanning-tree portfast
+
+end
+write
+
+
+------------------------------------------------------------------------
+5. CONFIGURACIÓN DEL SWITCH 2 (Lado Derecho)
+------------------------------------------------------------------------
+configure terminal
+hostname Switch2
+
+vlan 20
+ name LAN_PEAR_B
+exit
+
+! Puerto conectado al router PEAR-B
+interface Ethernet0/0
+ switchport mode access
+ switchport access vlan 20
+ spanning-tree portfast
+
+! Puerto conectado a PC2
+interface Ethernet0/1
+ switchport mode access
+ switchport access vlan 20
+ spanning-tree portfast
+
+end
+write
+
+
+------------------------------------------------------------------------
+6. TERMINALES: PCs (Consolas VPCS)
+------------------------------------------------------------------------
+* En PC1:
+ip 10.13.67.10 255.255.255.128 10.13.67.1
+save
+
+* En PC2:
+ip 10.13.67.140 255.255.255.128 10.13.67.129
+save
+========
