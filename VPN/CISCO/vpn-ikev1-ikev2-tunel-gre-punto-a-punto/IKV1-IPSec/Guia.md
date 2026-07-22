@@ -5,9 +5,6 @@
 **Modalidad:** GRE sobre IPsec (crypto map + ACL, **modo transporte**), sin VTI
 **Fase 1:** IKEv1 (crypto isakmp) — **Fase 2:** IPsec Transform-Set + Crypto Map aplicado a la interfaz física
 
-> 📌 **Diferencia clave con los laboratorios route-based (VTI):**
-> Aquí sí existe una interfaz `Tunnel0`, pero es **GRE puro** (`tunnel mode gre ip`), no una VTI de IPsec. La encriptación no la aplica el túnel — la aplica un **crypto map clásico sobre la interfaz física** (`Ethernet0/0`), usando una **ACL** que reconoce el tráfico GRE entre las dos IPs públicas como "tráfico interesante". El GRE se encarga de encapsular (y permite rutas dinámicas o multicast dentro del túnel); el IPsec en modo transporte solo cifra ese GRE ya encapsulado — por eso `mode transport` es correcto aquí y no `mode tunnel`.
-
 | Nombre en Topología | Rol | Nombre Asignado |
 |---|---|---|
 | Router1 | Nodo central de tránsito | **ISP** |
@@ -19,8 +16,6 @@
 ---
 
 # 🌐 ROUTER: ISP
-
-> Sin cambios respecto a los laboratorios anteriores. Sigue siendo solo un nodo de tránsito IP; no participa en la VPN.
 
 ## ► Aplicación de Interfaces
 
@@ -41,7 +36,6 @@ interface Ethernet0/1
 end
 write
 ```
-🔚 *Cierre del bloque de interfaces.*
 
 ---
 
@@ -65,7 +59,6 @@ interface Ethernet0/1
 
 end
 ```
-🔚 *Cierre del bloque de interfaces.*
 
 ## ► Aplicación de ACL — Tráfico Interesante (solo GRE)
 
@@ -73,7 +66,6 @@ end
 access-list 100 remark CIFRAR_UNICAMENTE_EL_GRE_ENTRE_LOS_PUBLICOS
 access-list 100 permit gre host 200.13.67.2 host 200.13.67.6
 ```
-🔚 *Cierre del bloque de ACL. Ojo: esta ACL no menciona las LAN (10.13.67.0/25) — solo protege el GRE entre las IPs públicas, porque las redes internas viajan **encapsuladas dentro** del GRE y no necesitan aparecer aquí.*
 
 ## ► Aplicación de IKEv1 — Fase 1 (ISAKMP)
 
@@ -87,7 +79,6 @@ crypto isakmp policy 10
 
 crypto isakmp key cisco123 address 200.13.67.6
 ```
-🔚 *Cierre del bloque ISAKMP. Define cifrado, autenticación PSK y el peer remoto (Fase 1 completa).*
 
 ## ► Aplicación de IPsec — Fase 2 (Transform-Set + Crypto Map)
 
@@ -101,7 +92,6 @@ crypto map CMAP_GRE 10 ipsec-isakmp
  set transform-set TSET_GRE
  match address 100
 ```
-🔚 *Cierre del bloque de IPsec. `mode transport` es correcto aquí porque GRE ya agrega su propio encabezado IP — no hace falta el encabezado extra de `mode tunnel`. A diferencia de los laboratorios VTI, aquí sí se usa `crypto map` (no `ipsec profile`), porque se aplicará a la interfaz física, no a una interfaz de túnel IPsec.*
 
 ## ► Aplicación del Crypto Map en la Interfaz Física
 
@@ -109,31 +99,28 @@ crypto map CMAP_GRE 10 ipsec-isakmp
 interface Ethernet0/0
  crypto map CMAP_GRE
 ```
-🔚 *Cierre del bloque. Esto activa el cifrado: todo el tráfico que salga por `Ethernet0/0` y coincida con la ACL 100 (el GRE hacia 200.13.67.6) se cifra antes de salir.*
 
 ## ► Aplicación de Interfaz de Túnel (GRE puro)
 
 ```
 interface Tunnel0
  description TUNEL_GRE_HACIA_PEARB
- ip address 172.16.0.1 255.255.255.252
+ ip address 172.13.67.1 255.255.255.252
  tunnel source Ethernet0/0
  tunnel destination 200.13.67.6
  tunnel mode gre ip
  no shutdown
 ```
-🔚 *Cierre del bloque de interfaz de túnel. Nótese que aquí NO hay `tunnel protection ipsec profile` — este túnel es GRE simple; la protección viene del crypto map en la interfaz física, no de la interfaz de túnel.*
 
 ## ► Aplicación de Enrutamiento
 
 ```
 ip route 200.13.67.4 255.255.255.252 200.13.67.1
-ip route 10.13.67.128 255.255.255.128 172.16.0.2
+ip route 10.13.67.128 255.255.255.128 172.13.67.2
 
 end
 write
 ```
-🔚 *Cierre del bloque de enrutamiento. La primera ruta lleva el tráfico hacia la WAN de PearB a través de ISP — indispensable para que el GRE (y por tanto el crypto map) tenga a quién llegar. La segunda ruta envía la LAN remota (VLAN 20) por el túnel GRE — el direccionamiento del túnel usa `/30` (172.16.0.1 y 172.16.0.2), solo 2 IPs, igual que en los laboratorios anteriores.*
 
 ---
 
@@ -157,7 +144,6 @@ interface Ethernet0/1
 
 end
 ```
-🔚 *Cierre del bloque de interfaces.*
 
 ## ► Aplicación de ACL — Tráfico Interesante (solo GRE)
 
@@ -165,7 +151,6 @@ end
 access-list 100 remark CIFRAR_UNICAMENTE_EL_GRE_ENTRE_LOS_PUBLICOS
 access-list 100 permit gre host 200.13.67.6 host 200.13.67.2
 ```
-🔚 *Cierre del bloque de ACL (espejo de PearA, orden fuente/destino invertido).*
 
 ## ► Aplicación de IKEv1 — Fase 1 (ISAKMP)
 
@@ -179,7 +164,6 @@ crypto isakmp policy 10
 
 crypto isakmp key cisco123 address 200.13.67.2
 ```
-🔚 *Cierre del bloque ISAKMP (Fase 1 completa).*
 
 ## ► Aplicación de IPsec — Fase 2 (Transform-Set + Crypto Map)
 
@@ -193,7 +177,6 @@ crypto map CMAP_GRE 10 ipsec-isakmp
  set transform-set TSET_GRE
  match address 100
 ```
-🔚 *Cierre del bloque de IPsec.*
 
 ## ► Aplicación del Crypto Map en la Interfaz Física
 
@@ -201,31 +184,28 @@ crypto map CMAP_GRE 10 ipsec-isakmp
 interface Ethernet0/0
  crypto map CMAP_GRE
 ```
-🔚 *Cierre del bloque.*
 
 ## ► Aplicación de Interfaz de Túnel (GRE puro)
 
 ```
 interface Tunnel0
  description TUNEL_GRE_HACIA_PEARA
- ip address 172.16.0.2 255.255.255.252
+ ip address 172.13.67.2 255.255.255.252
  tunnel source Ethernet0/0
  tunnel destination 200.13.67.2
  tunnel mode gre ip
  no shutdown
 ```
-🔚 *Cierre del bloque de interfaz de túnel.*
 
 ## ► Aplicación de Enrutamiento
 
 ```
 ip route 200.13.67.0 255.255.255.252 200.13.67.5
-ip route 10.13.67.0 255.255.255.128 172.16.0.1
+ip route 10.13.67.0 255.255.255.128 172.13.67.1
 
 end
 write
 ```
-🔚 *Cierre del bloque de enrutamiento. Espejo de PearA: ruta hacia la WAN de PearA vía ISP, y la LAN remota (VLAN 10) enviada por el túnel GRE.*
 
 ---
 
@@ -241,7 +221,6 @@ vlan 10
  name LAN_PEARA
 exit
 ```
-🔚 *Cierre del bloque de VLAN.*
 
 ## ► Aplicación de Modo Acceso
 
@@ -254,7 +233,6 @@ interface Ethernet0/1
  switchport mode access
  switchport access vlan 10
 ```
-🔚 *Cierre del bloque de modo acceso.*
 
 ## ► Aplicación de Seguridad de Puerto (Port-Security)
 
@@ -265,7 +243,6 @@ interface Ethernet0/1
  switchport port-security mac-address sticky
  switchport port-security violation restrict
 ```
-🔚 *Cierre del bloque de port-security.*
 
 ## ► Aplicación de STP (Protección de Borde)
 
@@ -281,7 +258,6 @@ interface Ethernet0/1
 end
 write
 ```
-🔚 *Cierre del bloque de STP.*
 
 ---
 
@@ -297,7 +273,6 @@ vlan 20
  name LAN_PEARB
 exit
 ```
-🔚 *Cierre del bloque de VLAN.*
 
 ## ► Aplicación de Modo Acceso
 
@@ -310,7 +285,6 @@ interface Ethernet0/1
  switchport mode access
  switchport access vlan 20
 ```
-🔚 *Cierre del bloque de modo acceso.*
 
 ## ► Aplicación de Seguridad de Puerto (Port-Security)
 
@@ -321,7 +295,6 @@ interface Ethernet0/1
  switchport port-security mac-address sticky
  switchport port-security violation restrict
 ```
-🔚 *Cierre del bloque de port-security.*
 
 ## ► Aplicación de STP (Protección de Borde)
 
@@ -337,7 +310,6 @@ interface Ethernet0/1
 end
 write
 ```
-🔚 *Cierre del bloque de STP.*
 
 ---
 
@@ -354,7 +326,6 @@ save
 ip 10.13.67.140 255.255.255.128 10.13.67.129
 save
 ```
-🔚 *Cierre del bloque de direccionamiento. Sin cambios respecto a los laboratorios anteriores.*
 
 ---
 
@@ -380,14 +351,14 @@ El `interface` mostrado será `Ethernet0/0` (no `Tunnel0`, como en las VTI), por
 show interface Tunnel0
 show ip interface brief
 ```
-`Tunnel0` debe estar `up/up`. A diferencia de las VTI, aquí **no** aparece "protected" en la descripción del túnel — el cifrado ocurre "por fuera", en la física.
+`Tunnel0` debe estar `up/up`.
 
 ## ► 4. Verificar la Tabla de Enrutamiento
 
 ```
 show ip route
 ```
-Debe existir la ruta hacia la LAN remota apuntando al **siguiente salto dentro del túnel** (172.16.0.2 en PearA / 172.16.0.1 en PearB), y también la ruta hacia la WAN del peer remoto — sin esta última, el GRE nunca encuentra a su destino y el crypto map jamás ve tráfico que cifrar.
+Debe existir la ruta hacia la LAN remota apuntando al **siguiente salto dentro del túnel** (172.13.67.2 en PearA / 172.13.67.1 en PearB), y también la ruta hacia la WAN del peer remoto.
 
 ## ► 5. Verificar el Crypto Map Aplicado
 
@@ -416,7 +387,7 @@ trace 10.13.67.140
 ping 10.13.67.10
 ```
 
-> 💡 **Nota:** en el `trace`, el segundo salto debe mostrar `172.16.0.2` (la IP del túnel GRE de PearB) — eso confirma que el paquete viajó por el túnel. Que el ping funcione y `#pkts encaps` aumente en `show crypto ipsec sa` confirma que ese GRE viajó **cifrado**, no en texto plano.
+> 💡 **Nota:** en el `trace`, el segundo salto debe mostrar `172.13.67.2` (la IP del túnel GRE de PearB).
 
 ✔️ El ping debe responder correctamente y los contadores en `show crypto ipsec sa` deben aumentar, confirmando que el GRE viaja cifrado dentro del túnel.
 
