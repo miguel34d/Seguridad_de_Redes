@@ -110,11 +110,12 @@ interface Tunnel0
 
 ```
 ip route 10.13.67.128 255.255.255.128 Tunnel0
+ip route 200.13.67.4 255.255.255.252 200.13.67.1
 
 end
 write
 ```
-🔚 *Cierre del bloque de enrutamiento. Todo lo destinado a la VLAN 20 remota se envía por Tunnel0 — esto es lo que activa el cifrado (route-based).*
+🔚 *Cierre del bloque de enrutamiento. La primera ruta envía la LAN remota (VLAN 20) por Tunnel0 — esto es lo que activa el cifrado (route-based). La segunda ruta es indispensable para que PearA alcance la WAN de PearB (200.13.67.6) a través de ISP; sin ella, `Tunnel0` nunca encuentra "output interface" y el ISAKMP se queda en `MM_NO_STATE`.*
 
 ---
 
@@ -183,11 +184,12 @@ interface Tunnel0
 
 ```
 ip route 10.13.67.0 255.255.255.128 Tunnel0
+ip route 200.13.67.0 255.255.255.252 200.13.67.5
 
 end
 write
 ```
-🔚 *Cierre del bloque de enrutamiento. Espejo de PearA: todo lo destinado a la VLAN 10 remota se envía por Tunnel0.*
+🔚 *Cierre del bloque de enrutamiento. Espejo de PearA: la primera ruta envía la VLAN 10 remota por Tunnel0; la segunda le da a PearB la ruta hacia la WAN de PearA (200.13.67.2) a través de ISP.*
 
 ---
 
@@ -351,7 +353,7 @@ show ip interface brief
 ```
 show ip route
 ```
-Debe existir la ruta hacia la LAN remota apuntando a `Tunnel0` — esto confirma que es **route-based** y no depende de ninguna ACL.
+Debe existir la ruta hacia la LAN remota apuntando a `Tunnel0`, **y también** la ruta hacia la WAN del peer remoto (200.13.67.4/30 en PearA, 200.13.67.0/30 en PearB) — sin esta última, `Tunnel0` no encuentra "output interface" y el túnel nunca levanta.
 
 ## ► 5. Verificar VLANs y puertos — en Switch-A y Switch-B
 
