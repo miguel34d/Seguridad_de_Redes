@@ -5,31 +5,31 @@
 ## 📡 0. TOPOLOGÍA Y DIRECCIONAMIENTO
 
 ```
-        PC1 --- Switch1 --- Router2 --- Router1 --- Router3 --- Switch2 --- PC2
+        PC1 --- Swich-A --- PearA --- Isp --- PearB --- Swich-b --- PC2
       (VPCS)              (PEAR-A)      (ISP)     (PEAR-B)              (VPCS)
 ```
 
 | Dispositivo | Interfaz | IP                  | Rol                     |
 |--------------|----------|---------------------|--------------------------|
-| Router1      | e0/0     | 200.13.67.1/30       | Tránsito ISP hacia R2   |
-| Router1      | e0/1     | 200.13.67.5/30       | Tránsito ISP hacia R3   |
-| Router2      | e0/0     | 200.13.67.2/30       | WAN (peer VPN)          |
-| Router2      | e0/1     | 10.13.67.1/25        | LAN local (Switch1)     |
-| Router3      | e0/0     | 200.13.67.6/30       | WAN (peer VPN)          |
-| Router3      | e0/1     | 10.13.67.129/25      | LAN local (Switch2)     |
+| Isp      | e0/0     | 200.13.67.1/30       | Tránsito ISP hacia PearA   |
+| Isp      | e0/1     | 200.13.67.5/30       | Tránsito ISP hacia PearB   |
+| PearA      | e0/0     | 200.13.67.2/30       | WAN (peer VPN)          |
+| PearA      | e0/1     | 10.13.67.1/25        | LAN local (Swich-A)     |
+| PearB      | e0/0     | 200.13.67.6/30       | WAN (peer VPN)          |
+| PearB      | e0/1     | 10.13.67.129/25      | LAN local (Swich-b)     |
 | PC1          | e0       | 10.13.67.10/25       | Gateway 10.13.67.1      |
 | PC2          | e0       | 10.13.67.140/25      | Gateway 10.13.67.129    |
 
-> **Nota:** Router1 solo enruta tráfico entre las WAN de Router2 y Router3, simulando un ISP. La VPN se levanta **entre Router2 y Router3**, usando sus IPs públicas 200.13.67.2 y 200.13.67.6.
+> **Nota:** Isp solo enruta tráfico entre las WAN de PearA y PearB, simulando un ISP. La VPN se levanta **entre PearA y PearB**, usando sus IPs públicas 200.13.67.2 y 200.13.67.6.
 
 ---
 ---
 
-# 🖥️ ROUTER 1 — ISP (TRÁNSITO)
+# 🖥️ ISP (TRÁNSITO)
 
 ```
 configure terminal
-hostname Router1
+hostname Isp
 !
 interface Ethernet0/0
  ip address 200.13.67.1 255.255.255.252
@@ -43,18 +43,18 @@ end
 write memory
 ```
 
-Router1 no necesita rutas estáticas adicionales porque solo conecta dos redes /30 directamente conectadas entre sí (actúa como el "internet" entre los dos sitios).
+Isp no necesita rutas estáticas adicionales porque solo conecta dos redes /30 directamente conectadas entre sí (actúa como el "internet" entre los dos sitios).
 
 ---
 ---
 
-# 🖥️ ROUTER 2 — PEAR A
+# 🖥️ PEARA
 
 ## 🧱 Direccionamiento y Ruta Base
 
 ```
 configure terminal
-hostname Router2
+hostname PearA
 !
 interface Ethernet0/0
  ip address 200.13.67.2 255.255.255.252
@@ -84,7 +84,7 @@ crypto isakmp key Cisco123! address 200.13.67.6
 end
 write memory
 ```
-> ✅ Cierro aquí la fase de **IKEv1**. Router2 ya puede autenticarse con Router3.
+> ✅ Cierro aquí la fase de **IKEv1**. PearA ya puede autenticarse con PearB.
 
 ## 🛡️ APLICACIÓN DE IPSEC (Fase 2 — Transform-Set)
 
@@ -122,18 +122,18 @@ interface Ethernet0/0
 end
 write memory
 ```
-> ✅ Cierro aquí el **Crypto Map**. La VPN queda activa en la interfaz WAN de Router2.
+> ✅ Cierro aquí el **Crypto Map**. La VPN queda activa en la interfaz WAN de PearA.
 
 ---
 ---
 
-# 🖥️ ROUTER 3 — PEAR B
+# 🖥️ PEARB
 
 ## 🧱 Direccionamiento y Ruta Base
 
 ```
 configure terminal
-hostname Router3
+hostname PearB
 !
 interface Ethernet0/0
  ip address 200.13.67.6 255.255.255.252
@@ -163,7 +163,7 @@ crypto isakmp key Cisco123! address 200.13.67.2
 end
 write memory
 ```
-> ✅ Cierro aquí la fase de **IKEv1**. Router3 ya puede autenticarse con Router2.
+> ✅ Cierro aquí la fase de **IKEv1**. PearB ya puede autenticarse con PearA.
 
 ## 🛡️ APLICACIÓN DE IPSEC (Fase 2 — Transform-Set)
 
@@ -206,13 +206,13 @@ write memory
 ---
 ---
 
-# 🔌 SWITCH 1 — LAN PEAR A
+# 🔌 SWICH-A (LAN PEARA)
 
 ## 🏷️ APLICACIÓN DE VLAN
 
 ```
 configure terminal
-hostname Switch1
+hostname Swich-A
 vlan 10
  name LAN_PEAR_A
 end
@@ -264,13 +264,13 @@ write memory
 ---
 ---
 
-# 🔌 SWITCH 2 — LAN PEAR B
+# 🔌 SWICH-B (LAN PEARB)
 
 ## 🏷️ APLICACIÓN DE VLAN
 
 ```
 configure terminal
-hostname Switch2
+hostname Swich-b
 vlan 20
  name LAN_PEAR_B
 end
@@ -376,7 +376,7 @@ Desde **PC2**:
 ping 10.13.67.10
 ```
 
-Ambos ping deben responder exitosamente. Justo después de lanzar el primer ping, vuelve a Router2 o Router3 y corre nuevamente `show crypto ipsec sa`: los contadores de paquetes cifrados deben haber aumentado, confirmando que el tráfico realmente está viajando **por el túnel IPsec** y no en texto claro.
+Ambos ping deben responder exitosamente. Justo después de lanzar el primer ping, vuelve a PearA o PearB y corre nuevamente `show crypto ipsec sa`: los contadores de paquetes cifrados deben haber aumentado, confirmando que el tráfico realmente está viajando **por el túnel IPsec** y no en texto claro.
 
 ## 🔒 Seguridad en los switches
 ```
