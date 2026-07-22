@@ -1,6 +1,8 @@
-# Guía de Configuración: VPN Site-to-Site (Policy-Based) IPsec IKEv1
+# 🔐 VPN Site-to-Site (Policy-Based) — IPsec IKEv1
 
-## 0. Topología y direccionamiento
+---
+
+## 📡 0. TOPOLOGÍA Y DIRECCIONAMIENTO
 
 ```
         PC1 --- Switch1 --- Router2 --- Router1 --- Router3 --- Switch2 --- PC2
@@ -18,11 +20,12 @@
 | PC1          | e0       | 10.13.67.10/25       | Gateway 10.13.67.1      |
 | PC2          | e0       | 10.13.67.140/25      | Gateway 10.13.67.129    |
 
-> **Nota:** Router1 solo enruta tráfico entre las WAN de Router2 y Router3, simulando un ISP. La VPN se levanta **entre Router2 y Router3** usando sus IPs públicas 200.13.67.2 y 200.13.67.6.
+> **Nota:** Router1 solo enruta tráfico entre las WAN de Router2 y Router3, simulando un ISP. La VPN se levanta **entre Router2 y Router3**, usando sus IPs públicas 200.13.67.2 y 200.13.67.6.
 
 ---
+---
 
-## 1. Configuración base — Router1 (ISP / tránsito)
+# 🖥️ ROUTER 1 — ISP (TRÁNSITO)
 
 ```
 configure terminal
@@ -43,8 +46,11 @@ write memory
 Router1 no necesita rutas estáticas adicionales porque solo conecta dos redes /30 directamente conectadas entre sí (actúa como el "internet" entre los dos sitios).
 
 ---
+---
 
-## 2. Configuración base — Router2 (PEAR-A)
+# 🖥️ ROUTER 2 — PEAR A
+
+## 🧱 Direccionamiento y Ruta Base
 
 ```
 configure terminal
@@ -63,7 +69,67 @@ end
 write memory
 ```
 
-## 3. Configuración base — Router3 (PEAR-B)
+## 🔑 APLICACIÓN DE IKE (Fase 1 — ISAKMV)
+
+```
+configure terminal
+crypto isakmp policy 10
+ encryption aes 256
+ hash sha256
+ authentication pre-share
+ group 14
+ lifetime 86400
+!
+crypto isakmp key Cisco123! address 200.13.67.6
+end
+write memory
+```
+> ✅ Cierro aquí la fase de **IKEv1**. Router2 ya puede autenticarse con Router3.
+
+## 🛡️ APLICACIÓN DE IPSEC (Fase 2 — Transform-Set)
+
+```
+configure terminal
+crypto ipsec transform-set TSET_IKEv1 esp-aes 256 esp-sha256-hmac
+ mode tunnel
+end
+write memory
+```
+> ✅ Cierro aquí la fase de **IPsec** (transform-set).
+
+## 📋 APLICACIÓN DE ACL (Tráfico Interesante)
+
+```
+configure terminal
+ip access-list extended VPN-TRAFFIC
+ permit ip 10.13.67.0 0.0.0.127 10.13.67.128 0.0.0.127
+end
+write memory
+```
+> ✅ Cierro aquí la **ACL**. Ya está definido qué tráfico se cifra.
+
+## 🗺️ APLICACIÓN DE CRYPTO MAP
+
+```
+configure terminal
+crypto map CMAP_VPN 10 ipsec-isakmp
+ set peer 200.13.67.6
+ set transform-set TSET_IKEv1
+ match address VPN-TRAFFIC
+!
+interface Ethernet0/0
+ crypto map CMAP_VPN
+end
+write memory
+```
+> ✅ Cierro aquí el **Crypto Map**. La VPN queda activa en la interfaz WAN de Router2.
+
+---
+---
+
+# 🖥️ ROUTER 3 — PEAR B
+
+## 🧱 Direccionamiento y Ruta Base
 
 ```
 configure terminal
@@ -82,30 +148,8 @@ end
 write memory
 ```
 
-En este punto, antes de tocar la VPN, verifica conectividad básica: `ping 200.13.67.6` desde Router2 debe responder a través de Router1.
+## 🔑 APLICACIÓN DE IKE (Fase 1 — ISAKMP)
 
----
-
-## 4. Aplicación de IKE (Fase 1 — ISAKMP)
-
-Esta fase negocia cómo se autentican y protegen los dos routers entre sí (el "canal seguro de control").
-
-**En Router2:**
-```
-configure terminal
-crypto isakmp policy 10
- encryption aes 256
- hash sha256
- authentication pre-share
- group 14
- lifetime 86400
-!
-crypto isakmp key Cisco123! address 200.13.67.6
-end
-write memory
-```
-
-**En Router3 (simétrico):**
 ```
 configure terminal
 crypto isakmp policy 10
@@ -119,16 +163,10 @@ crypto isakmp key Cisco123! address 200.13.67.2
 end
 write memory
 ```
+> ✅ Cierro aquí la fase de **IKEv1**. Router3 ya puede autenticarse con Router2.
 
-> Cierro aquí la fase de IKEv1. Ambos routers ya pueden autenticarse mutuamente.
+## 🛡️ APLICACIÓN DE IPSEC (Fase 2 — Transform-Set)
 
----
-
-## 5. Aplicación de IPsec (Fase 2 — Transform-Set)
-
-Define cómo se va a cifrar y garantizar la integridad del tráfico real de datos.
-
-**En Router2 y Router3 (idéntico en ambos):**
 ```
 configure terminal
 crypto ipsec transform-set TSET_IKEv1 esp-aes 256 esp-sha256-hmac
@@ -136,25 +174,10 @@ crypto ipsec transform-set TSET_IKEv1 esp-aes 256 esp-sha256-hmac
 end
 write memory
 ```
+> ✅ Cierro aquí la fase de **IPsec** (transform-set).
 
-> Cierro aquí la fase de IPsec (transform-set). El "cómo" del cifrado ya quedó definido.
+## 📋 APLICACIÓN DE ACL (Tráfico Interesante — espejo)
 
----
-
-## 6. Aplicación de ACL (tráfico interesante)
-
-Esta ACL define **qué tráfico** debe viajar cifrado por el túnel (solo LAN-a-LAN).
-
-**En Router2:**
-```
-configure terminal
-ip access-list extended VPN-TRAFFIC
- permit ip 10.13.67.0 0.0.0.127 10.13.67.128 0.0.0.127
-end
-write memory
-```
-
-**En Router3 (espejo/inverso):**
 ```
 configure terminal
 ip access-list extended VPN-TRAFFIC
@@ -162,30 +185,10 @@ ip access-list extended VPN-TRAFFIC
 end
 write memory
 ```
+> ✅ Cierro aquí la **ACL**.
 
-> Cierro aquí la ACL. Ya está definido el "qué" se cifra.
+## 🗺️ APLICACIÓN DE CRYPTO MAP
 
----
-
-## 7. Aplicación de Crypto Map (Policy-Based VPN)
-
-Aquí se amarra todo: ACL + transform-set + peer, y se aplica a la interfaz WAN.
-
-**En Router2:**
-```
-configure terminal
-crypto map CMAP_VPN 10 ipsec-isakmp
- set peer 200.13.67.6
- set transform-set TSET_IKEv1
- match address VPN-TRAFFIC
-!
-interface Ethernet0/0
- crypto map CMAP_VPN
-end
-write memory
-```
-
-**En Router3:**
 ```
 configure terminal
 crypto map CMAP_VPN 10 ipsec-isakmp
@@ -198,16 +201,15 @@ interface Ethernet0/0
 end
 write memory
 ```
-
-> Cierro aquí el crypto map. La VPN site-to-site policy-based queda operativa en la interfaz WAN de ambos routers.
+> ✅ Cierro aquí el **Crypto Map**. La VPN site-to-site policy-based queda operativa en ambos extremos.
 
 ---
+---
 
-## 8. Seguridad en los Switches
+# 🔌 SWITCH 1 — LAN PEAR A
 
-### 8.1 Aplicación de VLAN
+## 🏷️ APLICACIÓN DE VLAN
 
-**Switch1:**
 ```
 configure terminal
 hostname Switch1
@@ -216,8 +218,56 @@ vlan 10
 end
 write memory
 ```
+> ✅ Cierro aquí la **VLAN**.
 
-**Switch2:**
+## 🔗 APLICACIÓN DE MODO ACCESO
+
+```
+configure terminal
+interface Ethernet0/0
+ switchport mode access
+ switchport access vlan 10
+!
+interface Ethernet0/1
+ switchport mode access
+ switchport access vlan 10
+end
+write memory
+```
+> ✅ Cierro aquí el **modo acceso**.
+
+## 🔒 APLICACIÓN DE PORT-SECURITY
+
+```
+configure terminal
+interface Ethernet0/1
+ switchport port-security
+ switchport port-security maximum 1
+ switchport port-security violation restrict
+ switchport port-security mac-address sticky
+end
+write memory
+```
+> ✅ Cierro aquí el **port-security**.
+
+## ⚡ APLICACIÓN DE PORTFAST
+
+```
+configure terminal
+interface Ethernet0/1
+ spanning-tree portfast
+end
+write memory
+```
+> ✅ Cierro aquí **PortFast**.
+
+---
+---
+
+# 🔌 SWITCH 2 — LAN PEAR B
+
+## 🏷️ APLICACIÓN DE VLAN
+
 ```
 configure terminal
 hostname Switch2
@@ -226,26 +276,10 @@ vlan 20
 end
 write memory
 ```
+> ✅ Cierro aquí la **VLAN**.
 
-> Cierro aquí la aplicación de VLAN.
+## 🔗 APLICACIÓN DE MODO ACCESO
 
-### 8.2 Aplicación de modo acceso (switchport mode access)
-
-**Switch1 (puerto a Router2 y puerto a PC1):**
-```
-configure terminal
-interface Ethernet0/0
- switchport mode access
- switchport access vlan 10
-!
-interface Ethernet0/1
- switchport mode access
- switchport access vlan 10
-end
-write memory
-```
-
-**Switch2 (puerto a Router3 y puerto a PC2):**
 ```
 configure terminal
 interface Ethernet0/0
@@ -258,14 +292,10 @@ interface Ethernet0/1
 end
 write memory
 ```
+> ✅ Cierro aquí el **modo acceso**.
 
-> Cierro aquí la aplicación de modo acceso.
+## 🔒 APLICACIÓN DE PORT-SECURITY
 
-### 8.3 Aplicación de Port-Security
-
-Restringe cuántas MAC pueden conectarse por puerto y protege contra flooding/spoofing (aplica sobre todo al puerto conectado a la PC).
-
-**Switch1 — Ethernet0/1 (hacia PC1):**
 ```
 configure terminal
 interface Ethernet0/1
@@ -276,26 +306,10 @@ interface Ethernet0/1
 end
 write memory
 ```
+> ✅ Cierro aquí el **port-security**.
 
-**Switch2 — Ethernet0/1 (hacia PC2):**
-```
-configure terminal
-interface Ethernet0/1
- switchport port-security
- switchport port-security maximum 1
- switchport port-security violation restrict
- switchport port-security mac-address sticky
-end
-write memory
-```
+## ⚡ APLICACIÓN DE PORTFAST
 
-> Cierro aquí la aplicación de port-security.
-
-### 8.4 Aplicación de Spanning-Tree PortFast
-
-Evita retrasos de convergencia en puertos de acceso hacia hosts finales.
-
-**Switch1:**
 ```
 configure terminal
 interface Ethernet0/1
@@ -303,21 +317,12 @@ interface Ethernet0/1
 end
 write memory
 ```
-
-**Switch2:**
-```
-configure terminal
-interface Ethernet0/1
- spanning-tree portfast
-end
-write memory
-```
-
-> Cierro aquí PortFast.
+> ✅ Cierro aquí **PortFast**.
 
 ---
+---
 
-## 9. Configuración de las PCs (VPCS)
+# 💻 PC1 Y PC2 (VPCS)
 
 **PC1:**
 ```
@@ -332,37 +337,40 @@ save
 ```
 
 ---
+---
 
-## 10. Verificación de que todo funciona
+# ✅ VERIFICACIÓN FINAL — ¿TODO FUNCIONA?
 
-### 10.1 Verificar Fase 1 (ISAKMP/IKEv1)
+## 🔑 Fase 1 (ISAKMP / IKEv1)
 ```
 show crypto isakmp policy
 show crypto isakmp sa
 ```
 El estado de la SA debe mostrar `QM_IDLE` una vez haya tráfico interesante circulando.
 
-### 10.2 Verificar Fase 2 (IPsec)
+## 🛡️ Fase 2 (IPsec)
 ```
 show crypto ipsec sa
 ```
 Debes ver contadores de paquetes encapsulados (`#pkts encaps`) y desencapsulados (`#pkts decaps`) incrementando después de generar tráfico.
 
-### 10.3 Verificar el Crypto Map aplicado
+## 🗺️ Crypto Map aplicado
 ```
 show crypto map
 ```
 
-### 10.4 Verificar enrutamiento
+## 🧭 Enrutamiento
 ```
 show ip route
 ```
 
-### 10.5 Prueba de conectividad extremo a extremo
+## 🌐 Prueba de conectividad extremo a extremo
+
 Desde **PC1**:
 ```
 ping 10.13.67.140
 ```
+
 Desde **PC2**:
 ```
 ping 10.13.67.10
@@ -370,7 +378,7 @@ ping 10.13.67.10
 
 Ambos ping deben responder exitosamente. Justo después de lanzar el primer ping, vuelve a Router2 o Router3 y corre nuevamente `show crypto ipsec sa`: los contadores de paquetes cifrados deben haber aumentado, confirmando que el tráfico realmente está viajando **por el túnel IPsec** y no en texto claro.
 
-### 10.6 Verificación de seguridad en switches
+## 🔒 Seguridad en los switches
 ```
 show port-security
 show port-security address
@@ -379,18 +387,21 @@ show spanning-tree interface e0/1
 ```
 
 ---
+---
 
-## Resumen del orden de aplicación
+# 📌 RESUMEN DEL ORDEN DE APLICACIÓN
 
-1. Direccionamiento IP básico (routers)
-2. Enrutamiento (rutas estáticas hacia el ISP)
-3. **Aplicación de IKE** (isakmp policy + key)
-4. **Aplicación de IPsec** (transform-set)
-5. **Aplicación de ACL** (tráfico interesante)
-6. **Aplicación de Crypto Map** (amarre + aplicación a interfaz WAN)
-7. **Aplicación de VLAN** (switches)
-8. **Aplicación de modo acceso** (switchport)
-9. **Aplicación de Port-Security**
-10. **Aplicación de PortFast**
-11. Configuración de hosts (VPCS)
-12. Verificación final
+| # | Paso |
+|---|------|
+| 1 | Direccionamiento IP básico (routers) |
+| 2 | Enrutamiento (rutas estáticas hacia el ISP) |
+| 3 | **Aplicación de IKE** (isakmp policy + key) |
+| 4 | **Aplicación de IPsec** (transform-set) |
+| 5 | **Aplicación de ACL** (tráfico interesante) |
+| 6 | **Aplicación de Crypto Map** |
+| 7 | **Aplicación de VLAN** (switches) |
+| 8 | **Aplicación de modo acceso** (switchport) |
+| 9 | **Aplicación de Port-Security** |
+| 10 | **Aplicación de PortFast** |
+| 11 | Configuración de hosts (VPCS) |
+| 12 | Verificación final |
