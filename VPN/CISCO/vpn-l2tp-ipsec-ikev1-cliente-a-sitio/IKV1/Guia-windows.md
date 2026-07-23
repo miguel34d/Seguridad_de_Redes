@@ -18,8 +18,8 @@
 - [Resumen de la topología](#-resumen-de-la-topología)
 - [¿Por qué L2TP/IPsec y no site-to-site?](#-por-qué-l2tpipsec-y-no-un-site-to-site-clásico)
 - [Direccionamiento IP](#️-direccionamiento-ip)
-- [R1 — Nodo de tránsito](#-r1--nodo-de-tránsito--isp)
-- [R2 — Gateway del cliente](#️-r2--gateway-del-lado-cliente)
+- [R1 — Nodo de tránsito (ISP)](#-r1--nodo-de-tránsito--isp)
+- [R2 — Gateway del cliente + NAT](#️-r2--gateway-del-lado-cliente)
 - [R3 — Servidor VPN (LNS)](#️-r3--servidor-vpn--lns-l2tpipsec)
 - [Switch1 — VLAN 10](#-switch1--lado-cliente--vlan-10)
 - [Switch2 — VLAN 20](#-switch2--lan-protegida--vlan-20)
@@ -36,6 +36,7 @@
 Windows10-1 ── Switch1 ── R2 ── R1 (ISP/Tránsito) ── R3 ── Switch2 ── PC2
  (Cliente VPN)   VLAN10   Gateway            Servidor VPN   VLAN20   (Host destino)
                           Cliente             LNS
+                          (NAT overload)
 ```
 
 | Rol | Dispositivo |
@@ -47,6 +48,8 @@ Windows10-1 ── Switch1 ── R2 ── R1 (ISP/Tránsito) ── R3 ── 
 | Switch lado LAN protegida (VLAN 20) | **Switch2** |
 | Cliente VPN (Windows) | **Windows10-1** (NIC1) |
 | Host destino en la LAN protegida | **PC2** (VPCS) |
+
+> ⚠️ **Restricción de diseño:** R1 representa el **ISP** y solo tiene direccionamiento IP público en sus interfaces. **No lleva ninguna ruta estática ni protocolo de enrutamiento configurado.** Por eso el acceso hacia/desde las LANs privadas (10.13.67.0/24 y 20.13.67.0/24) se resuelve con **NAT overload (PAT) en R2**, no con rutas en el ISP.
 
 ---
 
@@ -67,10 +70,10 @@ Windows10-1 ── Switch1 ── R2 ── R1 (ISP/Tránsito) ── R3 ── 
 
 | Dispositivo | Interfaz | Dirección IP | Descripción |
 |---|---|---|---|
-| R1 | Fa0/0 | `200.13.67.1/30` | Enlace a R2 |
-| R1 | Fa0/1 | `200.13.67.5/30` | Enlace a R3 |
-| R2 | Fa0/0 | `200.13.67.2/30` | WAN hacia R1 (ISP) |
-| R2 | Fa0/1 | `10.13.67.1/24` | LAN cliente — VLAN 10 |
+| R1 | Fa0/0 | `200.13.67.1/30` | Enlace a R2 (IP pública) |
+| R1 | Fa0/1 | `200.13.67.5/30` | Enlace a R3 (IP pública) |
+| R2 | Fa0/0 | `200.13.67.2/30` | WAN hacia R1 (ISP) — IP pública NAT |
+| R2 | Fa0/1 | `10.13.67.1/24` | LAN cliente — VLAN 10 (privada) |
 | R3 | Fa0/0 | `200.13.67.6/30` | WAN hacia R1 — **IP pública del servidor VPN** |
 | R3 | Fa0/1 | `20.13.67.1/24` | LAN protegida — VLAN 20 |
 | R3 | Virtual-Template1 | *(unnumbered a Fa0/1)* | Interfaz virtual PPP para clientes L2TP |
@@ -102,6 +105,8 @@ end
 write
 ```
 
+> ✅ R1 **no lleva ninguna ruta estática ni protocolo de enrutamiento** (sin `ip route`, sin OSPF/EIGRP). Solo conoce sus dos redes conectadas directamente. Todo el tráfico que cruza el ISP viaja entre IPs públicas (`200.13.67.2` ⇄ `200.13.67.6`) gracias al NAT hecho en R2.
+
 ---
 
 ## 🛡️ R2 — Gateway del lado Cliente
@@ -131,8 +136,31 @@ end
 ip route 200.13.67.4 255.255.255.252 200.13.67.1
 
 end
+```
+
+### 🔁 Configuración de NAT (PAT / Overload)
+
+> Como el ISP (R1) no puede tener rutas hacia `10.13.67.0/24`, el cliente sale a Internet **traducido** a la IP pública de R2 (`200.13.67.2`). Así R1 nunca necesita saber de la LAN privada.
+
+```bash
+configure terminal
+
+ip access-list standard NAT_CLIENTE
+ permit 10.13.67.0 0.0.0.255
+
+interface FastEthernet0/1
+ ip nat inside
+
+interface FastEthernet0/0
+ ip nat outside
+
+ip nat inside source list NAT_CLIENTE interface FastEthernet0/0 overload
+
+end
 write
 ```
+
+> 📌 **NAT-T:** como el tráfico IPsec pasa por NAT, el cliente (Windows o Linux) debe negociar **NAT-Traversal (UDP 4500)**. El cliente nativo de Windows lo detecta automáticamente. En Linux/strongSwan, si no se activa solo, forzar con `forceencaps=yes` en `ipsec.conf`.
 
 ---
 
@@ -430,6 +458,7 @@ conn L2TP-PSK-R3
     authby=secret
     pfs=no
     rekey=no
+    forceencaps=yes
     left=%defaultroute
     leftprotoport=17/1701
     right=200.13.67.6
@@ -483,22 +512,31 @@ echo "c r3-vpn" | sudo tee /var/run/xl2tpd/l2tp-control
 ![Fase1](https://img.shields.io/badge/Fase%201-QM__IDLE-2ea043?style=flat-square)
 ![Fase2](https://img.shields.io/badge/Fase%202-SA%20Activa-2ea043?style=flat-square)
 ![L2TP](https://img.shields.io/badge/Sesión%20L2TP-Establecida-2ea043?style=flat-square)
+![NAT](https://img.shields.io/badge/NAT-Overload%20Activo-2ea043?style=flat-square)
 
-### 1️⃣ Verificar Fase 1 (ISAKMP SA) — en R3
+### 1️⃣ Verificar NAT — en R2
+
+```bash
+show ip nat translations
+show ip nat statistics
+```
+Debe mostrarse la traducción de `10.13.67.10` hacia `200.13.67.2` en el momento en que el cliente intenta negociar.
+
+### 2️⃣ Verificar Fase 1 (ISAKMP SA) — en R3
 
 ```bash
 show crypto isakmp sa
 ```
-Debe mostrar el estado **QM_IDLE** con la IP pública/actual de Windows10-1 como peer.
+Debe mostrar el estado **QM_IDLE** con la IP pública de R2 (`200.13.67.2`) como peer — no la IP privada del cliente, ya que viene traducida.
 
-### 2️⃣ Verificar Fase 2 (IPsec SA)
+### 3️⃣ Verificar Fase 2 (IPsec SA)
 
 ```bash
 show crypto ipsec sa
 ```
-Debe verse tráfico cifrado (`encaps`/`decaps` incrementando) sobre el par UDP 1701.
+Debe verse tráfico cifrado (`encaps`/`decaps` incrementando) sobre el par UDP 1701 (y UDP 4500 si hay NAT-T activo).
 
-### 3️⃣ Verificar la sesión L2TP / PPP
+### 4️⃣ Verificar la sesión L2TP / PPP
 
 ```bash
 show vpdn session all
@@ -508,14 +546,14 @@ show interface virtual-access 1
 ```
 `show caller ip` debe listar al usuario `vpnuser` con una IP asignada del pool `192.168.100.10–20`.
 
-### 4️⃣ Verificar enrutamiento
+### 5️⃣ Verificar enrutamiento
 
 ```bash
 show ip route
 ```
-La red del pool VPN debe verse alcanzable a través de la interfaz Virtual-Access clonada.
+En R1 confirma que **no hay ninguna ruta configurada** (solo las dos conectadas). En R2 y R3, confirma las rutas hacia el otro extremo `/30`.
 
-### 5️⃣ Prueba de Conectividad End-to-End
+### 6️⃣ Prueba de Conectividad End-to-End
 
 **Desde Windows10-1 (VPN conectada):**
 ```bash
