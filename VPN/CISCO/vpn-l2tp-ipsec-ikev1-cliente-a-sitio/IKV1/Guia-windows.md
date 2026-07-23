@@ -237,10 +237,12 @@ aaa new-model
 aaa authentication ppp default local
 aaa authorization network default local
 
-username vpnuser secret cisco123
+username vpnuser password cisco123
 
 ip local pool POOL_L2TP 192.168.100.10 192.168.100.20
 ```
+
+> ⚠️ **Importante:** usar `username vpnuser password cisco123`, **no** `secret`. El comando `secret` guarda la contraseña como hash MD5 irreversible, y PPP con CHAP/MS-CHAPv2 necesita la contraseña en texto reversible para calcular el reto de autenticación. Con `secret` la VPN siempre da el error *"Se denegó la conexión remota porque no se reconoce la combinación de nombre de usuario y contraseña..."*, aunque el túnel IPsec/L2TP se levante bien.
 
 ### 📡 Configuración de L2TP (VPDN + Virtual-Template)
 
@@ -564,6 +566,15 @@ ping 20.13.67.10
 ```bash
 ping 192.168.100.10
 ```
+
+### 7️⃣ Confirmación final — conexión establecida
+
+✅ **Verificado:** tras corregir `username vpnuser password cisco123` en R3, el cliente Windows conectó exitosamente a `VPN-R3-L2TP`, autenticando con usuario `vpnuser` y recibiendo IP del pool `192.168.100.10–20`. La VPN client-to-site L2TP/IPsec (IKEv1) queda funcional al 100%:
+
+- Fase 1 (ISAKMP): PSK negociado correctamente entre Windows10-1 (traducido vía NAT a `200.13.67.2`) y R3 (`200.13.67.6`).
+- Fase 2 (IPsec): SA activa en modo transporte.
+- Sesión L2TP/PPP: establecida, autenticación MS-CHAPv2 exitosa.
+- Conectividad end-to-end confirmada hacia PC2 (`20.13.67.10`) a través del túnel.
 
 ---
 
