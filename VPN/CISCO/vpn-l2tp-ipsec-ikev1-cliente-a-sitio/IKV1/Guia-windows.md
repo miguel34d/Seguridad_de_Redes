@@ -61,8 +61,6 @@ Windows10-1 ── Switch1 ── R2 ── R1 (ISP/Tránsito) ── R3 ── 
 | Asignación de IP al remoto | Ruta estática/dinámica normal | **Pool de direcciones** entregado por PPP |
 | Versión de IKE típica | IKEv2 (moderno) | **IKEv1** — único soportado por el cliente nativo de Windows |
 
-> 💡 El cliente VPN incorporado de Windows para "L2TP/IPsec con clave precompartida" **solo negocia IKEv1**. Por eso R3 usa `crypto isakmp` (Fase 1 clásica) y no `crypto ikev2`.
-
 ---
 
 ## 🗺️ Direccionamiento IP
@@ -72,12 +70,12 @@ Windows10-1 ── Switch1 ── R2 ── R1 (ISP/Tránsito) ── R3 ── 
 | R1 | Fa0/0 | `200.13.67.1/30` | Enlace a R2 |
 | R1 | Fa0/1 | `200.13.67.5/30` | Enlace a R3 |
 | R2 | Fa0/0 | `200.13.67.2/30` | WAN hacia R1 (ISP) |
-| R2 | Fa0/1 | `10.10.10.1/24` | LAN cliente — VLAN 10 |
+| R2 | Fa0/1 | `10.13.67.1/24` | LAN cliente — VLAN 10 |
 | R3 | Fa0/0 | `200.13.67.6/30` | WAN hacia R1 — **IP pública del servidor VPN** |
-| R3 | Fa0/1 | `10.20.20.1/24` | LAN protegida — VLAN 20 |
+| R3 | Fa0/1 | `20.13.67.1/24` | LAN protegida — VLAN 20 |
 | R3 | Virtual-Template1 | *(unnumbered a Fa0/1)* | Interfaz virtual PPP para clientes L2TP |
-| Windows10-1 | NIC1 | `10.10.10.10/24` GW `10.10.10.1` | Cliente VPN (equipo remoto) |
-| PC2 | NIC | `10.20.20.10/24` GW `10.20.20.1` | Host destino protegido |
+| Windows10-1 | NIC1 | `10.13.67.10/24` GW `10.13.67.1` | Cliente VPN (equipo remoto) |
+| PC2 | NIC | `20.13.67.10/24` GW `20.13.67.1` | Host destino protegido |
 | Pool VPN | — | `192.168.100.10 – 192.168.100.20` | Asignado por PPP al conectar |
 
 ---
@@ -104,8 +102,6 @@ end
 write
 ```
 
-> 📌 R1 solo cumple el rol de **tránsito** (equivalente al ISP): ambos enlaces /30 quedan directamente conectados en su tabla de rutas, por lo que no requiere rutas estáticas adicionales ni participa en el túnel L2TP/IPsec.
-
 ---
 
 ## 🛡️ R2 — Gateway del lado Cliente
@@ -123,7 +119,7 @@ interface FastEthernet0/0
 
 interface FastEthernet0/1
  description LAN_CLIENTE_VLAN10
- ip address 10.10.10.1 255.255.255.0
+ ip address 10.13.67.1 255.255.255.0
  no shutdown
 
 end
@@ -137,8 +133,6 @@ ip route 200.13.67.4 255.255.255.252 200.13.67.1
 end
 write
 ```
-
-> 📌 R2 **no participa en la negociación L2TP/IPsec**, solo provee salida WAN para Windows10-1. El túnel real se establece **directamente entre Windows10-1 y R3**, pasando de forma transparente por R2 y R1.
 
 ---
 
@@ -157,7 +151,7 @@ interface FastEthernet0/0
 
 interface FastEthernet0/1
  description LAN_PROTEGIDA_VLAN20
- ip address 10.20.20.1 255.255.255.0
+ ip address 20.13.67.1 255.255.255.0
  no shutdown
 
 end
@@ -168,9 +162,9 @@ end
 ```bash
 crypto isakmp policy 10
  encr aes 256
- hash sha256
+ hash sha
  authentication pre-share
- group 14
+ group 5
  lifetime 86400
 
 crypto isakmp policy 20
@@ -182,16 +176,13 @@ crypto isakmp policy 20
 
 crypto isakmp key cisco123 address 0.0.0.0 0.0.0.0
 
-crypto isakmp nat-traversal 20
 crypto isakmp keepalive 10 3
 ```
-
-> ⚠️ Se incluyen **dos políticas ISAKMP**: `policy 10` (AES-256/SHA-256/DH14, segura) y `policy 20` (3DES/SHA1/DH2, la que el cliente nativo de Windows propone **por defecto**). Si solo se deja la política fuerte, un Windows sin ajustes de registro no podrá negociar Fase 1 y el túnel fallará silenciosamente.
 
 ### 🔒 Configuración de Fase 2 — IPsec (Transform-Set, modo transporte)
 
 ```bash
-crypto ipsec transform-set TSET_L2TP esp-aes 256 esp-sha256-hmac
+crypto ipsec transform-set TSET_L2TP esp-aes 256 esp-sha-hmac
  mode transport
 
 crypto ipsec transform-set TSET_L2TP_LEGACY esp-3des esp-sha-hmac
@@ -203,8 +194,6 @@ crypto dynamic-map DYNMAP_L2TP 10
 
 crypto map CMAP_L2TP 10 ipsec-isakmp dynamic DYNMAP_L2TP
 ```
-
-> 💡 Se usa **modo transporte** porque L2TP ya encapsula el tráfico de usuario en PPP/UDP 1701; IPsec solo cifra ese datagrama. Se usa un **crypto map dinámico** porque el cliente remoto puede tener cualquier IP pública.
 
 ### 🔗 Aplicación del Crypto Map en la interfaz WAN
 
@@ -241,8 +230,6 @@ interface Virtual-Template1
  ppp authentication ms-chap-v2 chap pap
  ppp encrypt mppe auto
 ```
-
-> 💡 `virtual-template 1` es la plantilla que Cisco IOS clona dinámicamente en una interfaz **Virtual-Access** por cada cliente L2TP conectado. `ip unnumbered FastEthernet0/1` hace que la interfaz virtual "tome prestada" la subred 10.20.20.0/24, dejando al cliente remoto enrutable hacia PC2 sin NAT. `ppp authentication ms-chap-v2` es el método por defecto del cliente nativo de Windows.
 
 ### 🧭 Configuración de Enrutamiento
 
@@ -316,8 +303,6 @@ end
 write
 ```
 
-> 📌 `switchport port-security maximum 1` + `mac-address sticky` asegura que **solo la NIC1 de Windows10-1** puede usar ese puerto: si alguien conecta otro dispositivo, el puerto entra en `restrict` (descarta tráfico y genera log, sin apagarse). Los puertos sin uso se mueven a la VLAN "basurero" (999) y se apagan.
-
 ---
 
 ## 🖧 Switch2 — LAN Protegida (VLAN 20)
@@ -388,15 +373,13 @@ write
 ### ⚙️ Configuración de Interfaz
 
 ```bash
-ip 10.20.20.10 255.255.255.0 10.20.20.1
+ip 20.13.67.10 255.255.255.0 20.13.67.1
 save
 ```
 
 ---
 
 ## 🪟 Windows10-1 — Configuración del túnel (vía Interfaz Gráfica)
-
-> ✅ Método recomendado para el laboratorio — no requiere PowerShell.
 
 | Paso | Acción |
 |---|---|
@@ -408,8 +391,6 @@ save
 | 6 | Clave precompartida: **`cisco123`** |
 | 7 | Tipo de información de inicio de sesión: **Nombre de usuario y contraseña** → Usuario `vpnuser` / Contraseña `cisco123` |
 | 8 | **Guardar** y presionar **Conectar** |
-
-> ⚠️ Si el servidor VPN estuviera detrás de NAT (no aplica en esta topología, `200.13.67.6` es IP pública directa), sería necesario el ajuste de registro `AssumeUDPEncapsulationContextOnSendRule` para permitir NAT-T.
 
 <details>
 <summary>🧩 Alternativa por PowerShell</summary>
@@ -538,15 +519,13 @@ La red del pool VPN debe verse alcanzable a través de la interfaz Virtual-Acces
 
 **Desde Windows10-1 (VPN conectada):**
 ```bash
-ping 10.20.20.10
+ping 20.13.67.10
 ```
 
 **Desde PC2 (VPCS), hacia la IP asignada por R3:**
 ```bash
 ping 192.168.100.10
 ```
-
-> 💡 Si el `ping` desde Windows10-1 falla pero Fase 1/Fase 2 muestran SA activas, revisar el firewall de Windows (puede bloquear ICMP de salida) y confirmar que la ruta por defecto de la VPN no rompa la resolución DNS local (desmarcar *"Usar la puerta de enlace predeterminada de la red remota"* si solo se necesita split-tunnel a la LAN protegida).
 
 ---
 
