@@ -47,8 +47,6 @@
 | Host en Sitio A | (opcional, VLAN 10) |
 | Host en Sitio B | **PC2** (VPCS) |
 
-> ⚠️ **Restricción de diseño (igual que en la versión client-to-site):** R1 es el **ISP**, solo tiene direccionamiento IP público en sus interfaces y **no lleva ninguna ruta estática ni protocolo de enrutamiento**. En site-to-site esto **no requiere NAT**: el tráfico interesante (LAN↔LAN) viaja encapsulado dentro de paquetes ESP cuyo encabezado externo usa las IPs públicas de R2 y R3 (`200.13.67.2` ⇄ `200.13.67.6`), que ya están directamente conectadas a R1. R1 nunca ve ni necesita saber de `10.13.67.0/24` ni `20.13.67.0/24`.
-
 ---
 
 ## 📌 Diferencias vs. Client-to-Site (L2TP)
@@ -101,8 +99,6 @@ end
 write
 ```
 
-> ✅ Sin `ip route`, sin OSPF/EIGRP. Solo conoce sus dos redes conectadas — suficiente, porque el tráfico IPsec entre R2 y R3 usa esas IPs públicas directamente.
-
 ---
 
 ## 🛡️ R2 — Extremo VPN Sitio A
@@ -129,7 +125,7 @@ end
 ### 🧭 Configuración de Enrutamiento
 
 ```bash
-ip route 200.13.67.4 255.255.255.252 200.13.67.1
+ip route 0.0.0.0 0.0.0.0 200.13.67.1
 
 end
 ```
@@ -207,7 +203,7 @@ end
 ### 🧭 Configuración de Enrutamiento
 
 ```bash
-ip route 200.13.67.0 255.255.255.252 200.13.67.5
+ip route 0.0.0.0 0.0.0.0 200.13.67.5
 
 end
 ```
@@ -380,28 +376,24 @@ save
 ```bash
 show crypto isakmp sa
 ```
-Debe mostrar el estado **QM_IDLE** con el peer correspondiente (`200.13.67.6` visto desde R2, `200.13.67.2` visto desde R3).
 
 ### 2️⃣ Verificar Fase 2 (IPsec SA)
 
 ```bash
 show crypto ipsec sa
 ```
-Debe verse la ACL de tráfico interesante coincidiendo (`10.13.67.0/24 ⇄ 20.13.67.0/24`) y los contadores `encaps`/`decaps` incrementando.
 
 ### 3️⃣ Verificar el crypto map aplicado
 
 ```bash
 show crypto map
 ```
-Confirma que `CMAP_SITE2SITE` está activo en Fa0/0 de ambos routers, con el `peer` y `transform-set` correctos.
 
 ### 4️⃣ Verificar enrutamiento
 
 ```bash
 show ip route
 ```
-En R1: confirma que **no hay ninguna ruta configurada**, solo las dos redes conectadas. En R2 y R3: confirma la ruta hacia el `/30` del otro extremo.
 
 ### 5️⃣ Prueba de Conectividad End-to-End
 
@@ -414,8 +406,6 @@ ping 20.13.67.10
 ```bash
 ping 10.13.67.1
 ```
-
-El tráfico debe salir cifrado por el túnel IPsec (verifica que `encaps`/`decaps` sube en `show crypto ipsec sa` al hacer el ping) y no debe pasar en texto plano por R1.
 
 ---
 
