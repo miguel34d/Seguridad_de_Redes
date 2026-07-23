@@ -286,16 +286,18 @@ crypto ikev2 policy POL_DMVPN
  proposal PROP_DMVPN
 
 crypto ikev2 keyring KEYRING_DMVPN
- peer HUB
-  address 200.13.67.2
+ peer ANY
+  address 0.0.0.0 0.0.0.0
   pre-shared-key cisco123
 
 crypto ikev2 profile PROF_DMVPN
- match identity remote address 200.13.67.2 255.255.255.255
+ match identity remote address 0.0.0.0 0.0.0.0
  authentication remote pre-share
  authentication local pre-share
  keyring local KEYRING_DMVPN
 ```
+
+> ⚠️ Igual que en Spoke1: **0.0.0.0 0.0.0.0**, no solo la IP del Hub — Spoke2 también debe poder negociar IKEv2 directo contra Spoke1 cuando se arme el shortcut.
 
 ## ► Aplicación de IPsec — Fase 2 (Transform-Set + IPsec Profile)
 
